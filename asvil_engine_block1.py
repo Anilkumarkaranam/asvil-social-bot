@@ -33,8 +33,8 @@ def generate_post(request: PostRequest):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured in environment variables.")
     
     try:
-        # Using gemini-1.5-pro which is fully supported for content generation
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        # Using gemini-pro which is universally supported
+        model = genai.GenerativeModel("gemini-pro")
         
         prompt = f"""
         You are an expert financial services copywriter and social media manager for Asvil Galaxy Finserv Private Limited based in Tadepalligudem, Andhra Pradesh.
