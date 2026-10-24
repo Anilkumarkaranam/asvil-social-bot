@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     fonts-noto-core \
-    fonts-noto-unstated \
+    fonts-noto-unhinted \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
