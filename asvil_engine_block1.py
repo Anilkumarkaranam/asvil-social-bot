@@ -7,7 +7,7 @@ import google.generativeai as genai
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="1.6.0"
+    version="1.7.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -25,6 +25,29 @@ class PostRequest(BaseModel):
 class PublishRequest(BaseModel):
     message: str
 
+def get_working_gemini_model():
+    """Automatically selects gemini-2.5-flash or the first supported model available on the API key."""
+    preferred_models = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+        "gemini-flash-latest"
+    ]
+    try:
+        available_models = [
+            m.name.replace("models/", "")
+            for m in genai.list_models()
+            if "generateContent" in getattr(m, "supported_generation_methods", [])
+        ]
+        for model_name in preferred_models:
+            if model_name in available_models:
+                return genai.GenerativeModel(model_name)
+        if available_models:
+            return genai.GenerativeModel(available_models[0])
+    except Exception:
+        pass
+    return genai.GenerativeModel("gemini-2.5-flash")
+
 @app.get("/", response_class=HTMLResponse)
 def home_page():
     return """
@@ -40,7 +63,7 @@ def home_page():
             h2 { color: #1a365d; margin-top: 0; }
             label { font-weight: bold; display: block; margin-top: 15px; }
             input[type="text"], textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-            textarea { height: 120px; }
+            textarea { height: 140px; }
             button { background: #2563eb; color: white; border: none; padding: 12px 20px; margin-top: 15px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
             button:hover { background: #1d4ed8; }
             #status { margin-top: 20px; padding: 12px; border-radius: 4px; white-space: pre-wrap; display: none; }
@@ -101,8 +124,9 @@ def home_page():
 
                     if (!pubRes.ok) throw new Error(pubData.detail || 'Publishing failed');
 
+                    const postId = pubData.publishing_results?.facebook?.id || 'Success';
                     statusDiv.className = 'success';
-                    statusDiv.innerText = 'Successfully published to Facebook!';
+                    statusDiv.innerText = 'Successfully published to Facebook! (Post ID: ' + postId + ')';
                 } catch (err) {
                     statusDiv.className = 'error';
                     statusDiv.innerText = 'Error: ' + err.message;
@@ -118,7 +142,7 @@ def generate_post(request: PostRequest):
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured.")
     try:
-        model = genai.GenerativeModel("gemini-pro")
+        model = get_working_gemini_model()
         prompt = f"""
         You are an expert financial services copywriter for Asvil Galaxy Finserv Private Limited based in Tadepalligudem, Andhra Pradesh.
         Create an engaging social media marketing post about: {request.topic}.
@@ -139,7 +163,6 @@ def publish_to_socials(request: PublishRequest):
     if not META_SYSTEM_TOKEN or not FB_PAGE_ID:
         raise HTTPException(status_code=500, detail="Meta API tokens or Page ID are missing in environment variables.")
     
-    results = {}
     try:
         fb_url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/feed"
         fb_payload = {
@@ -147,11 +170,17 @@ def publish_to_socials(request: PublishRequest):
             "access_token": META_SYSTEM_TOKEN
         }
         fb_response = requests.post(fb_url, data=fb_payload)
-        results["facebook"] = fb_response.json()
-    except Exception as e:
-        results["facebook"] = {"error": str(e)}
+        fb_data = fb_response.json()
 
-    return {
-        "status": "completed",
-        "publishing_results": results
-    }
+        if "error" in fb_data:
+            error_msg = fb_data["error"].get("message", str(fb_data["error"]))
+            raise HTTPException(status_code=400, detail=f"Facebook API Error: {error_msg}")
+
+        return {
+            "status": "completed",
+            "publishing_results": {"facebook": fb_data}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
