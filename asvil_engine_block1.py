@@ -6,13 +6,13 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="1.9.0"
+    version="2.0.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 META_SYSTEM_TOKEN = os.getenv("META_SYSTEM_TOKEN")
-FB_PAGE_ID = os.getenv("FB_PAGE_ID")
-IG_ACCOUNT_ID = os.getenv("IG_ACCOUNT_ID")
+# Default fallback page ID if none selected
+DEFAULT_FB_PAGE_ID = os.getenv("FB_PAGE_ID", "384113174785081")
 
 class PostRequest(BaseModel):
     topic: str
@@ -20,6 +20,7 @@ class PostRequest(BaseModel):
 
 class PublishRequest(BaseModel):
     message: str
+    page_id: str = None
 
 @app.get("/", response_class=HTMLResponse)
 def home_page():
@@ -35,8 +36,8 @@ def home_page():
             .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
             h2 { color: #1a365d; margin-top: 0; }
             label { font-weight: bold; display: block; margin-top: 15px; }
-            input[type="text"], textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-            textarea { height: 150px; }
+            input[type="text"], textarea, select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+            textarea { height: 140px; }
             button { background: #2563eb; color: white; border: none; padding: 12px 20px; margin-top: 15px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
             button:hover { background: #1d4ed8; }
             .secondary-btn { background: #059669; margin-top: 10px; }
@@ -49,17 +50,25 @@ def home_page():
     <body>
         <div class="card">
             <h2>Asvil Galaxy Finserv - Social Bot</h2>
-            <p>Enter a topic below to generate marketing copy and publish directly to Facebook.</p>
+            <p>Generate AI marketing copy and publish directly to your Facebook pages.</p>
             
+            <label for="pageSelect">Select Facebook Page:</label>
+            <select id="pageSelect">
+                <option value="384113174785081">Asvil Galaxy Finserv (Main)</option>
+                <!-- Add your other 2 page IDs below if you want custom dropdown names -->
+                <option value="YOUR_SECOND_PAGE_ID">Page 2 (Edit ID in code if needed)</option>
+                <option value="YOUR_THIRD_PAGE_ID">Page 3 (Edit ID in code if needed)</option>
+            </select>
+
             <label for="topicInput">Post Topic:</label>
             <input type="text" id="topicInput" value="MSME Business Loans for expanding local trade in Tadepalligudem">
             
             <button onclick="generateAndPublish()">Generate & Publish to Facebook</button>
             
-            <label for="outputBox">Generated Caption (You can also type or edit here):</label>
-            <textarea id="outputBox" placeholder="Generated caption will appear here..."></textarea>
+            <label for="outputBox">Generated Caption:</label>
+            <textarea id="outputBox" placeholder="Caption will appear here..."></textarea>
             
-            <button class="secondary-btn" onclick="publishOnly()">Publish Text in Box Directly to Facebook</button>
+            <button class="secondary-btn" onclick="publishOnly()">Publish Text in Box to Selected Page</button>
             
             <div id="status"></div>
         </div>
@@ -82,26 +91,10 @@ def home_page():
                         body: JSON.stringify({ topic: topic, language: 'English' })
                     });
                     const genData = await genRes.json();
-                    
                     if (!genRes.ok) throw new Error(genData.detail || 'Generation failed');
                     
-                    const caption = genData.generated_caption;
-                    outputBox.value = caption;
-                    
-                    statusDiv.innerText = 'Publishing to Facebook...';
-
-                    const pubRes = await fetch('/publish-to-socials', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: caption })
-                    });
-                    const pubData = await pubRes.json();
-
-                    if (!pubRes.ok) throw new Error(pubData.detail || 'Publishing failed');
-
-                    const postId = pubData.publishing_results?.facebook?.id || 'Success';
-                    statusDiv.className = 'success';
-                    statusDiv.innerText = 'Successfully published to Facebook! (Post ID: ' + postId + ')';
+                    outputBox.value = genData.generated_caption;
+                    await publishOnly();
                 } catch (err) {
                     statusDiv.className = 'error';
                     statusDiv.innerText = 'Error: ' + err.message;
@@ -110,24 +103,25 @@ def home_page():
 
             async function publishOnly() {
                 const caption = document.getElementById('outputBox').value.trim();
+                const pageId = document.getElementById('pageSelect').value;
                 const statusDiv = document.getElementById('status');
 
                 if (!caption) {
                     statusDiv.style.display = 'block';
                     statusDiv.className = 'error';
-                    statusDiv.innerText = 'Please type or generate a caption in the box first.';
+                    statusDiv.innerText = 'Please generate or enter text first.';
                     return;
                 }
 
                 statusDiv.style.display = 'block';
                 statusDiv.className = '';
-                statusDiv.innerText = 'Publishing to Facebook...';
+                statusDiv.innerText = 'Publishing to selected Facebook Page...';
 
                 try {
                     const pubRes = await fetch('/publish-to-socials', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: caption })
+                        body: JSON.stringify({ message: caption, page_id: pageId })
                     });
                     const pubData = await pubRes.json();
 
@@ -135,7 +129,7 @@ def home_page():
 
                     const postId = pubData.publishing_results?.facebook?.id || 'Success';
                     statusDiv.className = 'success';
-                    statusDiv.innerText = 'Successfully published to Facebook! (Post ID: ' + postId + ')';
+                    statusDiv.innerText = 'Successfully published! (Post ID: ' + postId + ')';
                 } catch (err) {
                     statusDiv.className = 'error';
                     statusDiv.innerText = 'Error: ' + err.message;
@@ -158,48 +152,32 @@ def generate_post(request: PostRequest):
         f"Include a clear call-to-action for MSME Business Loans & Personal Loans and relevant hashtags."
     )
 
-    # Try fast low-latency models in order, with low thinking overhead so requests never time out
-    model_configs = [
-        ("gemini-3.5-flash-lite", {"thinkingConfig": {"thinkingLevel": "minimal"}}),
-        ("gemini-3.8-flash", {"thinkingConfig": {"thinkingLevel": "low"}}),
-        ("gemini-3.6-flash", {"thinkingConfig": {"thinkingLevel": "low"}})
-    ]
-
-    last_error = ""
-    for model_name, gen_config in model_configs:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": gen_config
-        }
-        try:
-            res = requests.post(url, json=payload, timeout=25)
-            data = res.json()
-
-            if res.ok and "candidates" in data:
-                parts = data["candidates"][0].get("content", {}).get("parts", [])
-                generated_text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
-                if generated_text:
-                    return {
-                        "status": "success",
-                        "model_used": model_name,
-                        "topic": request.topic,
-                        "generated_caption": generated_text
-                    }
-            else:
-                last_error = data.get("error", {}).get("message", str(data))
-        except Exception as e:
-            last_error = str(e)
-
-    raise HTTPException(status_code=500, detail=f"Gemini API Error: {last_error}")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"thinkingConfig": {"thinkingLevel": "minimal"}}
+    }
+    
+    try:
+        res = requests.post(url, json=payload, timeout=25)
+        data = res.json()
+        if res.ok and "candidates" in data:
+            parts = data["candidates"][0].get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+            return {"status": "success", "generated_caption": text}
+        raise HTTPException(status_code=500, detail=data.get("error", {}).get("message", "Generation error"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/publish-to-socials")
 def publish_to_socials(request: PublishRequest):
-    if not META_SYSTEM_TOKEN or not FB_PAGE_ID:
-        raise HTTPException(status_code=500, detail="Meta API tokens or Page ID are missing in environment variables.")
+    if not META_SYSTEM_TOKEN:
+        raise HTTPException(status_code=500, detail="META_SYSTEM_TOKEN is missing in environment variables.")
+    
+    target_page_id = request.page_id or DEFAULT_FB_PAGE_ID
     
     try:
-        fb_url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/feed"
+        fb_url = f"https://graph.facebook.com/v18.0/{target_page_id}/feed"
         fb_payload = {
             "message": request.message,
             "access_token": META_SYSTEM_TOKEN
