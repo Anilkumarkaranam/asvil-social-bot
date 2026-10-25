@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -51,12 +51,8 @@ def home_page():
             <h2>Asvil Galaxy Finserv - Social Bot</h2>
             <p>Generate AI marketing copy and publish directly to your Facebook pages.</p>
             
-            <label for="pageSelect">Select Facebook Page:</label>
-            <select id="pageSelect">
-                <option value="384113174785081">Asvil Galaxy Finserv (Main)</option>
-                <option value="YOUR_SECOND_PAGE_ID">Page 2 (Update ID if needed)</option>
-                <option value="YOUR_THIRD_PAGE_ID">Page 3 (Update ID if needed)</option>
-            </select>
+            <label for="pageSelect">Select Facebook Page ID:</label>
+            <input type="text" id="pageSelect" value="384113174785081" placeholder="Enter FB Page ID">
 
             <label for="topicInput">Post Topic:</label>
             <input type="text" id="topicInput" value="MSME Business Loans for expanding local trade in Tadepalligudem">
@@ -101,7 +97,7 @@ def home_page():
 
             async function publishOnly() {
                 const caption = document.getElementById('outputBox').value.trim();
-                const pageId = document.getElementById('pageSelect').value;
+                const pageId = document.getElementById('pageSelect').value.trim();
                 const statusDiv = document.getElementById('status');
 
                 if (!caption) {
@@ -175,10 +171,23 @@ def publish_to_socials(request: PublishRequest):
     target_page_id = request.page_id or DEFAULT_FB_PAGE_ID
     
     try:
+        # Step A: Automatically fetch the correct Page Access Token using the user/system token
+        accounts_url = f"https://graph.facebook.com/v18.0/me/accounts?access_token={META_SYSTEM_TOKEN}"
+        acc_res = requests.get(accounts_url, timeout=15)
+        acc_data = acc_res.json()
+        
+        page_access_token = META_SYSTEM_TOKEN # fallback
+        if "data" in acc_data:
+            for page in acc_data["data"]:
+                if page.get("id") == target_page_id:
+                    page_access_token = page.get("access_token")
+                    break
+
+        # Step B: Publish post using the verified Page Access Token
         fb_url = f"https://graph.facebook.com/v18.0/{target_page_id}/feed"
         fb_payload = {
             "message": request.message,
-            "access_token": META_SYSTEM_TOKEN
+            "access_token": page_access_token
         }
         fb_response = requests.post(fb_url, data=fb_payload, timeout=30)
         fb_data = fb_response.json()
