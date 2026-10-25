@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="2.2.0"
+    version="2.3.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -160,11 +160,9 @@ def check_token():
         return {"status": "error", "message": "META_SYSTEM_TOKEN is empty in environment variables."}
     
     try:
-        # Check token debug info
         debug_url = f"https://graph.facebook.com/v18.0/debug_token?input_token={META_SYSTEM_TOKEN}&access_token={META_SYSTEM_TOKEN}"
         debug_res = requests.get(debug_url, timeout=15).json()
         
-        # Check what pages this token can see
         accounts_url = f"https://graph.facebook.com/v18.0/me/accounts?access_token={META_SYSTEM_TOKEN}"
         acc_res = requests.get(accounts_url, timeout=15).json()
         
@@ -212,6 +210,7 @@ def publish_to_socials(request: PublishRequest):
     target_page_id = request.page_id or DEFAULT_FB_PAGE_ID
     
     try:
+        # Dynamically fetch the page-specific access token using the user token
         accounts_url = f"https://graph.facebook.com/v18.0/me/accounts?access_token={META_SYSTEM_TOKEN}"
         acc_res = requests.get(accounts_url, timeout=15)
         acc_data = acc_res.json()
@@ -223,7 +222,7 @@ def publish_to_socials(request: PublishRequest):
                     page_access_token = page.get("access_token")
                     break
 
-        fb_url = f"https://graph.facebook.0/v18.0/{target_page_id}/feed".replace(".0", "")
+        fb_url = f"https://graph.facebook.com/v18.0/{target_page_id}/feed"
         fb_payload = {
             "message": request.message,
             "access_token": page_access_token
