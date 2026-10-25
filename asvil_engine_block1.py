@@ -11,7 +11,6 @@ app = FastAPI(
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 META_SYSTEM_TOKEN = os.getenv("META_SYSTEM_TOKEN")
-# Default fallback page ID if none selected
 DEFAULT_FB_PAGE_ID = os.getenv("FB_PAGE_ID", "384113174785081")
 
 class PostRequest(BaseModel):
@@ -55,9 +54,8 @@ def home_page():
             <label for="pageSelect">Select Facebook Page:</label>
             <select id="pageSelect">
                 <option value="384113174785081">Asvil Galaxy Finserv (Main)</option>
-                <!-- Add your other 2 page IDs below if you want custom dropdown names -->
-                <option value="YOUR_SECOND_PAGE_ID">Page 2 (Edit ID in code if needed)</option>
-                <option value="YOUR_THIRD_PAGE_ID">Page 3 (Edit ID in code if needed)</option>
+                <option value="YOUR_SECOND_PAGE_ID">Page 2 (Update ID if needed)</option>
+                <option value="YOUR_THIRD_PAGE_ID">Page 3 (Update ID if needed)</option>
             </select>
 
             <label for="topicInput">Post Topic:</label>
