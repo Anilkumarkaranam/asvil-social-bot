@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="1.8.0"
+    version="1.9.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -36,9 +36,11 @@ def home_page():
             h2 { color: #1a365d; margin-top: 0; }
             label { font-weight: bold; display: block; margin-top: 15px; }
             input[type="text"], textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-            textarea { height: 140px; }
+            textarea { height: 150px; }
             button { background: #2563eb; color: white; border: none; padding: 12px 20px; margin-top: 15px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
             button:hover { background: #1d4ed8; }
+            .secondary-btn { background: #059669; margin-top: 10px; }
+            .secondary-btn:hover { background: #047857; }
             #status { margin-top: 20px; padding: 12px; border-radius: 4px; white-space: pre-wrap; display: none; }
             .success { background: #d1fae5; color: #065f46; border: 1px solid #10b981; }
             .error { background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; }
@@ -54,8 +56,10 @@ def home_page():
             
             <button onclick="generateAndPublish()">Generate & Publish to Facebook</button>
             
-            <label for="outputBox">Generated Caption & Status:</label>
-            <textarea id="outputBox" placeholder="Result will appear here..."></textarea>
+            <label for="outputBox">Generated Caption (You can also type or edit here):</label>
+            <textarea id="outputBox" placeholder="Generated caption will appear here..."></textarea>
+            
+            <button class="secondary-btn" onclick="publishOnly()">Publish Text in Box Directly to Facebook</button>
             
             <div id="status"></div>
         </div>
@@ -68,11 +72,10 @@ def home_page():
                 
                 statusDiv.style.display = 'block';
                 statusDiv.className = '';
-                statusDiv.innerText = 'Generating caption with Gemini 3.8 Flash...';
+                statusDiv.innerText = 'Generating caption with Gemini...';
                 outputBox.value = '';
 
                 try {
-                    // Step 1: Generate Post
                     const genRes = await fetch('/generate-post', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -87,7 +90,40 @@ def home_page():
                     
                     statusDiv.innerText = 'Publishing to Facebook...';
 
-                    // Step 2: Publish to Facebook
+                    const pubRes = await fetch('/publish-to-socials', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: caption })
+                    });
+                    const pubData = await pubRes.json();
+
+                    if (!pubRes.ok) throw new Error(pubData.detail || 'Publishing failed');
+
+                    const postId = pubData.publishing_results?.facebook?.id || 'Success';
+                    statusDiv.className = 'success';
+                    statusDiv.innerText = 'Successfully published to Facebook! (Post ID: ' + postId + ')';
+                } catch (err) {
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = 'Error: ' + err.message;
+                }
+            }
+
+            async function publishOnly() {
+                const caption = document.getElementById('outputBox').value.trim();
+                const statusDiv = document.getElementById('status');
+
+                if (!caption) {
+                    statusDiv.style.display = 'block';
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = 'Please type or generate a caption in the box first.';
+                    return;
+                }
+
+                statusDiv.style.display = 'block';
+                statusDiv.className = '';
+                statusDiv.innerText = 'Publishing to Facebook...';
+
+                try {
                     const pubRes = await fetch('/publish-to-socials', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -115,42 +151,47 @@ def generate_post(request: PostRequest):
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured.")
     
-    prompt = f"""
-    You are an expert financial services copywriter for Asvil Galaxy Finserv Private Limited based in Tadepalligudem, Andhra Pradesh.
-    Create an engaging social media marketing post about: {request.topic}.
-    Language: {request.language}.
-    Include a clear call-to-action regarding MSME Business Loans & Personal Loans and relevant hashtags.
-    """
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt}
-                ]
-            }
-        ]
-    }
-    
-    try:
-        res = requests.post(url, json=payload, timeout=45)
-        data = res.json()
-        
-        if not res.ok:
-            error_msg = data.get("error", {}).get("message", str(data))
-            raise HTTPException(status_code=res.status_code, detail=f"Gemini API Error: {error_msg}")
-        
-        generated_text = data["candidates"][0]["content"]["parts"][0]["text"]
-        return {
-            "status": "success",
-            "topic": request.topic,
-            "generated_caption": generated_text
+    prompt = (
+        f"You are an expert financial services copywriter for Asvil Galaxy Finserv Private Limited "
+        f"based in Tadepalligudem, Andhra Pradesh. Write an engaging, concise social media marketing post "
+        f"about: {request.topic}. Language: {request.language}. "
+        f"Include a clear call-to-action for MSME Business Loans & Personal Loans and relevant hashtags."
+    )
+
+    # Try fast low-latency models in order, with low thinking overhead so requests never time out
+    model_configs = [
+        ("gemini-3.5-flash-lite", {"thinkingConfig": {"thinkingLevel": "minimal"}}),
+        ("gemini-3.8-flash", {"thinkingConfig": {"thinkingLevel": "low"}}),
+        ("gemini-3.6-flash", {"thinkingConfig": {"thinkingLevel": "low"}})
+    ]
+
+    last_error = ""
+    for model_name, gen_config in model_configs:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": gen_config
         }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        try:
+            res = requests.post(url, json=payload, timeout=25)
+            data = res.json()
+
+            if res.ok and "candidates" in data:
+                parts = data["candidates"][0].get("content", {}).get("parts", [])
+                generated_text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+                if generated_text:
+                    return {
+                        "status": "success",
+                        "model_used": model_name,
+                        "topic": request.topic,
+                        "generated_caption": generated_text
+                    }
+            else:
+                last_error = data.get("error", {}).get("message", str(data))
+        except Exception as e:
+            last_error = str(e)
+
+    raise HTTPException(status_code=500, detail=f"Gemini API Error: {last_error}")
 
 @app.post("/publish-to-socials")
 def publish_to_socials(request: PublishRequest):
