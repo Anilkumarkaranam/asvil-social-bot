@@ -7,7 +7,7 @@ import google.generativeai as genai
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="1.3.0"
+    version="1.4.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -118,7 +118,7 @@ def generate_post(request: PostRequest):
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured.")
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash-latest")
         prompt = f"""
         You are an expert financial services copywriter for Asvil Galaxy Finserv Private Limited based in Tadepalligudem, Andhra Pradesh.
         Create an engaging social media marketing post about: {request.topic}.
