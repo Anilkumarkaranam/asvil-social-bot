@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="2.1.0"
+    version="2.2.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -41,6 +41,8 @@ def home_page():
             button:hover { background: #1d4ed8; }
             .secondary-btn { background: #059669; margin-top: 10px; }
             .secondary-btn:hover { background: #047857; }
+            .debug-btn { background: #d97706; margin-top: 10px; }
+            .debug-btn:hover { background: #b45309; }
             #status { margin-top: 20px; padding: 12px; border-radius: 4px; white-space: pre-wrap; display: none; }
             .success { background: #d1fae5; color: #065f46; border: 1px solid #10b981; }
             .error { background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; }
@@ -63,6 +65,7 @@ def home_page():
             <textarea id="outputBox" placeholder="Caption will appear here..."></textarea>
             
             <button class="secondary-btn" onclick="publishOnly()">Publish Text in Box to Selected Page</button>
+            <button class="debug-btn" onclick="checkToken()">Diagnostic: Check Token & Pages Access</button>
             
             <div id="status"></div>
         </div>
@@ -129,10 +132,48 @@ def home_page():
                     statusDiv.innerText = 'Error: ' + err.message;
                 }
             }
+
+            async function checkToken() {
+                const statusDiv = document.getElementById('status');
+                statusDiv.style.display = 'block';
+                statusDiv.className = '';
+                statusDiv.innerText = 'Checking token status with Facebook...';
+
+                try {
+                    const res = await fetch('/check-token');
+                    const data = await res.json();
+                    statusDiv.className = res.ok ? 'success' : 'error';
+                    statusDiv.innerText = JSON.stringify(data, null, 2);
+                } catch (err) {
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = 'Diagnostic check failed: ' + err.message;
+                }
+            }
         </script>
     </body>
     </html>
     """
+
+@app.get("/check-token")
+def check_token():
+    if not META_SYSTEM_TOKEN:
+        return {"status": "error", "message": "META_SYSTEM_TOKEN is empty in environment variables."}
+    
+    try:
+        # Check token debug info
+        debug_url = f"https://graph.facebook.com/v18.0/debug_token?input_token={META_SYSTEM_TOKEN}&access_token={META_SYSTEM_TOKEN}"
+        debug_res = requests.get(debug_url, timeout=15).json()
+        
+        # Check what pages this token can see
+        accounts_url = f"https://graph.facebook.com/v18.0/me/accounts?access_token={META_SYSTEM_TOKEN}"
+        acc_res = requests.get(accounts_url, timeout=15).json()
+        
+        return {
+            "token_debug_info": debug_res.get("data", debug_res),
+            "accessible_pages": acc_res.get("data", acc_res)
+        }
+    except Exception as e:
+        return {"status": "error", "exception": str(e)}
 
 @app.post("/generate-post")
 def generate_post(request: PostRequest):
@@ -171,20 +212,18 @@ def publish_to_socials(request: PublishRequest):
     target_page_id = request.page_id or DEFAULT_FB_PAGE_ID
     
     try:
-        # Step A: Automatically fetch the correct Page Access Token using the user/system token
         accounts_url = f"https://graph.facebook.com/v18.0/me/accounts?access_token={META_SYSTEM_TOKEN}"
         acc_res = requests.get(accounts_url, timeout=15)
         acc_data = acc_res.json()
         
-        page_access_token = META_SYSTEM_TOKEN # fallback
+        page_access_token = META_SYSTEM_TOKEN
         if "data" in acc_data:
             for page in acc_data["data"]:
                 if page.get("id") == target_page_id:
                     page_access_token = page.get("access_token")
                     break
 
-        # Step B: Publish post using the verified Page Access Token
-        fb_url = f"https://graph.facebook.com/v18.0/{target_page_id}/feed"
+        fb_url = f"https://graph.facebook.0/v18.0/{target_page_id}/feed".replace(".0", "")
         fb_payload = {
             "message": request.message,
             "access_token": page_access_token
