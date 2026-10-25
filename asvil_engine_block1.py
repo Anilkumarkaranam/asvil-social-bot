@@ -3,11 +3,10 @@ import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-import google.generativeai as genai
 
 app = FastAPI(
     title="Asvil Galaxy Finserv - Social Media Automation Engine",
-    version="1.7.0"
+    version="1.8.0"
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -15,38 +14,12 @@ META_SYSTEM_TOKEN = os.getenv("META_SYSTEM_TOKEN")
 FB_PAGE_ID = os.getenv("FB_PAGE_ID")
 IG_ACCOUNT_ID = os.getenv("IG_ACCOUNT_ID")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
 class PostRequest(BaseModel):
     topic: str
     language: str = "English"
 
 class PublishRequest(BaseModel):
     message: str
-
-def get_working_gemini_model():
-    """Automatically selects gemini-2.5-flash or the first supported model available on the API key."""
-    preferred_models = [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
-        "gemini-flash-latest"
-    ]
-    try:
-        available_models = [
-            m.name.replace("models/", "")
-            for m in genai.list_models()
-            if "generateContent" in getattr(m, "supported_generation_methods", [])
-        ]
-        for model_name in preferred_models:
-            if model_name in available_models:
-                return genai.GenerativeModel(model_name)
-        if available_models:
-            return genai.GenerativeModel(available_models[0])
-    except Exception:
-        pass
-    return genai.GenerativeModel("gemini-2.5-flash")
 
 @app.get("/", response_class=HTMLResponse)
 def home_page():
@@ -95,7 +68,7 @@ def home_page():
                 
                 statusDiv.style.display = 'block';
                 statusDiv.className = '';
-                statusDiv.innerText = 'Generating caption with Gemini...';
+                statusDiv.innerText = 'Generating caption with Gemini 3.8 Flash...';
                 outputBox.value = '';
 
                 try {
@@ -141,22 +114,43 @@ def home_page():
 def generate_post(request: PostRequest):
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured.")
+    
+    prompt = f"""
+    You are an expert financial services copywriter for Asvil Galaxy Finserv Private Limited based in Tadepalligudem, Andhra Pradesh.
+    Create an engaging social media marketing post about: {request.topic}.
+    Language: {request.language}.
+    Include a clear call-to-action regarding MSME Business Loans & Personal Loans and relevant hashtags.
+    """
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ]
+    }
+    
     try:
-        model = get_working_gemini_model()
-        prompt = f"""
-        You are an expert financial services copywriter for Asvil Galaxy Finserv Private Limited based in Tadepalligudem, Andhra Pradesh.
-        Create an engaging social media marketing post about: {request.topic}.
-        Language: {request.language}.
-        Include call-to-action regarding MSME Business Loans & Personal Loans and hashtags.
-        """
-        response = model.generate_content(prompt)
+        res = requests.post(url, json=payload, timeout=45)
+        data = res.json()
+        
+        if not res.ok:
+            error_msg = data.get("error", {}).get("message", str(data))
+            raise HTTPException(status_code=res.status_code, detail=f"Gemini API Error: {error_msg}")
+        
+        generated_text = data["candidates"][0]["content"]["parts"][0]["text"]
         return {
             "status": "success",
             "topic": request.topic,
-            "generated_caption": response.text
+            "generated_caption": generated_text
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @app.post("/publish-to-socials")
 def publish_to_socials(request: PublishRequest):
@@ -169,7 +163,7 @@ def publish_to_socials(request: PublishRequest):
             "message": request.message,
             "access_token": META_SYSTEM_TOKEN
         }
-        fb_response = requests.post(fb_url, data=fb_payload)
+        fb_response = requests.post(fb_url, data=fb_payload, timeout=30)
         fb_data = fb_response.json()
 
         if "error" in fb_data:
